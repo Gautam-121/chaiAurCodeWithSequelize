@@ -9,6 +9,8 @@ import {
   isValidPassword,
   isValidUsernameLength,
 } from "../utils/validation.js";
+import { cookieOptions , frontendUrlResetPassword  } from "../constant.js";
+import sendEmail from "../utils/sendEmail.js";
 
 const generateAccessAndRefreshToken = async(user)=>{
     try {
@@ -246,8 +248,8 @@ export const login = asyncHandler(async(req,res,next)=>{
     )
 })
 
-
 export const logOut = asyncHandler(async(req,res,next)=>{
+
     await User.update(
         {refreshToken: null},
         {
@@ -255,11 +257,6 @@ export const logOut = asyncHandler(async(req,res,next)=>{
             returning: true
         }
     )
-
-    const cookieOptions = {
-        httpOnly: true,
-        secure: true
-    }
 
     res.status(200)
     .clearCookie("accessToken" , cookieOptions)
@@ -272,5 +269,182 @@ export const logOut = asyncHandler(async(req,res,next)=>{
         )
     )
 })
+
+export const refreshAccessToken = asyncHandler(async(req,res,next)=>{
+
+    const incomingRefreshToken = req.cookie?.refreshToken || req.body?.refreshToken
+
+    if(!incomingRefreshToken){
+        return next(
+            new ApiError(
+                "Invalid Refresh token or token is invalid",
+                401
+            )
+        )
+    }
+
+    const decodedToken = jwt.verify(incomingRefreshToken , process.env.JWT_REFRESH_ACCESS_TOKEN)
+
+    if(!decodedToken){
+        return next(
+            new ApiError(
+                "Invalid refresh token or refresh token is expired",
+                401
+            )
+        )
+    }
+
+    const user = await User.findByPk(decodedToken.id)
+
+    if(!user){
+        return next(
+            new ApiError(
+                "Invalid refresh token or refresh token is expired",
+                401
+            )
+        )
+    }
+
+    const {accessToken , refreshToken} = await generateAccessAndRefreshToken(user)
+
+    const userloggedIn = await User.findByPk(user.id,{
+        attributes:{
+            exclude: ["password","refreshToken"]
+        }
+    })
+
+    return res.status(200)
+    .cookie("accessToken" , accessToken)
+    .cookie("refreshToken" , refreshToken)
+    .json(
+        new ApiResponse(
+            200,
+            {
+                userloggedIn,
+                accessToken,
+                refreshToken
+            },
+            "refresh token created Successfully"
+        )
+    )
+})
+
+export const forgotPassword = asyncHandler(async(req,res,next)=>{
+
+    const { email } = req.body
+
+    if(!email){
+        return next(
+            new ApiError(
+                "Email is missing",
+                400
+            )
+        )
+    }
+
+    const user = await User.findOne({
+        where:{
+            email: email.trim()
+        }
+    })
+
+    if(!user){
+        return next(
+            new ApiError(
+                "User not found",
+                404
+            )
+        )
+    }
+
+    const token = user.generateForgotPasswordToken()
+
+    const resetPasswordUrl = `${req.protocol}://${req.get(
+        "host")}/api/v1/user/password/reset/${user.id}/${token}`
+    
+    const message = `Your password reset token is :- \n\n ${resetPasswordUrl} \n\nIf you have not requested this email then, please ignore it.`;
+
+    try {
+
+        await sendEmail({
+            email: user.email,
+            subject: "Password recovery",
+            message
+        })
+
+        return res.status(200).json(
+            new ApiResponse(
+                200,
+                {},
+                `Email sent to ${user.email} successfully`
+            )
+        )
+
+    } catch (error) {
+        return next(
+            new ApiError(
+                error?.message || "Something went wrong while sending email",
+                500
+            )
+        )
+    }
+})
+
+export const resetPassword = asyncHandler(async(req,res,next)=>{
+
+    const { id , token } = req.params
+
+    if(!token){
+        return next(
+            new ApiError(
+                "token is expired or Invalid token",
+                401
+            )
+        )
+    }
+
+    const decodedToken = jwt.verify(token , process.env.FORGOT_TOKEN_SECRET)
+
+    if(!decodedToken){
+        return next(
+            new ApiError(
+                "Invalid token or token is expired",
+                401
+            )
+        )
+    }
+
+    return res.redirect(301, frontendUrlResetPassword)
+
+})
+
+export const getUserDetails = asyncHandler(async(req,res,next)=>{
+
+    const user = await User.findByPk(req.user.id,{
+        attributes:{
+            exclude: ["password", "refreshToken"]
+        }
+    })
+
+    if(!user){
+        return next(
+            new ApiError(
+                "User not found",
+                404
+            )
+        )
+    }
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            user,
+            "User data send successfully"
+        )
+    )
+})
+
+
+
 
 

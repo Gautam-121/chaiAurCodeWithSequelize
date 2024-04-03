@@ -119,4 +119,16 @@ User.prototype.generateRefreshToken = function (){
     )
 }
 
+User.prototype.generateForgotPasswordToken = function(){
+    return jwt.sign(
+        {
+            id: this.id
+        },
+        process.env.FORGOT_TOKEN_SECRET,
+        {
+            expiresIn: process.env.FORGOT_TOKEN_EXPIRE
+        }
+    )
+}
+
 export default User
